@@ -42,7 +42,6 @@ public class ServerUDP {
                 case "UPLOAD":
                     fileName = parts[1];
                     fileLength = Integer.parseInt(parts[2]);
-                    currentPath = parts[3];
                     receiveFile(serverSocket, clientAddress, clientPort);
                 break;
                 case "DOWNLOAD":
@@ -70,19 +69,50 @@ public class ServerUDP {
 
         boolean receiving = true;
         long totalBytesReceived = 0;
+        int expectedSequenceNumber = 0; //Expected Sequence Number
+        int windowStart = 0; //Window's index
+
         while (receiving) {
             DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
             serverSocket.receive(receivePacket);
-            
-            fileOutputStream.write(receivePacket.getData(), 0, receivePacket.getLength());
-            totalBytesReceived += receivePacket.getLength();
 
-            if (totalBytesReceived >= fileLength) {
-                receiving = false;
+            //Reading the sequence number
+            int sequenceNumber = byteArrayToInt(receivePacket.getData(), 0);
+            System.out.println("SERVER: Package received: " + sequenceNumber);
+            
+            if(sequenceNumber == expectedSequenceNumber){ //It's the expected package
+                fileOutputStream.write(receivePacket.getData(), 4, receivePacket.getLength() - 4);
+                totalBytesReceived += receivePacket.getLength() - 4;
+
+                //Send ACK to client
+                String ack = "ACK;" + sequenceNumber;
+                byte[] ackData = ack.getBytes();
+                DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
+                serverSocket.send(ackPacket);
+
+                expectedSequenceNumber++;
+                windowStart++;  //Slide window
+
+                if (totalBytesReceived >= fileLength) {
+                    receiving = false;
+                }
+            } else if(sequenceNumber < expectedSequenceNumber){ //If we receive a duplicated package
+                String ack = "ACK;" + sequenceNumber;
+                byte[] ackData = ack.getBytes();
+                DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
+                serverSocket.send(ackPacket);
+            } else{
+                System.out.println("SERVER: Package out of order :(");
             }
         }
 
         fileOutputStream.close();
         System.out.println("SERVER: File recieved and saved!");
+    }
+
+    //Convert first 4 bytes of package received into an int sequence number
+    private static int byteArrayToInt(byte[] arr, int offset) {
+        return ((arr[offset] & 0xFF) << 24) | ((arr[offset + 1] & 0xFF) << 16) |
+               ((arr[offset + 2] & 0xFF) << 8) | (arr[offset + 3] & 0xFF);
     }
 }
