@@ -23,16 +23,29 @@ public class ClientUDP {
 
         while (true) {
             System.out.println("¿What do you want to do?");
-            System.out.print("1. UPLOAD\n2. DOWNLOAD\n3. CREATE FOLDER\n4. DELETE FOLDER\n5. RENAME FILE");
+            System.out.println("1. UPLOAD\n2. DOWNLOAD\n3. CREATE FOLDER\n4. DELETE FOLDER\n5. RENAME FILE");
+            System.out.print("Enter an option: ");
             String command = scanner.nextLine();
+
+            LoadingScreen loadingScreen = new LoadingScreen();
+            Thread loadingThread = new Thread(loadingScreen);
 
             switch(command){
                 case "1": //UPLOAD
-                    System.out.println("Name of File: ");
+                    System.out.println("\nName of File: ");
                     fileName = scanner.nextLine();
-                    System.out.println("File Location: ");
+                    System.out.println("\nFile Location: ");
                     destinationPath+= scanner.nextLine();
+
+                    loadingThread.start();
                     sendFileWithMetadata(clientSocket, serverAddress, fileName, destinationPath);
+                    loadingScreen.stopLoading();
+                    loadingThread.join();
+            
+                    System.out.print("\r\033[1;32mFile sent successfully!                \033[0m\n");
+
+                    Thread.sleep(1000);
+                    clearConsole();
                 break;
                 case "2": //DOWNLOAD
 
@@ -100,7 +113,7 @@ public class ClientUDP {
                     bytesRead = fileInputStream.read(fileBuffer);
 
                     //Wait until send the next package
-                    Thread.sleep(10); //PRETTY IMPORTANT!!!!!!!
+                    Thread.sleep(1); //PRETTY IMPORTANT!!!!!!!
                 }
             }
     
@@ -114,7 +127,7 @@ public class ClientUDP {
                     clientSocket.receive(ackPacket);
     
                     // Read ACK
-                    System.out.println("CLIENT: ACK received for all packages in a window");
+                    // System.out.println("CLIENT: ACK received for all packages in a window");
                     String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
                     String[] ackParts = ack.split(";");
                     if (ackParts[0].equals("ACK")){
@@ -127,12 +140,12 @@ public class ClientUDP {
                             ackReceived = true;
                         }
                     } else{
-                        System.out.println("CLIENT: I received an strange Datagram :/");
+                        // System.out.println("CLIENT: I received an strange Datagram :/");
                     }
                 } catch (IOException e) {
                     // Resend if timeout occurs
                     if (attempts > 0) {
-                        System.out.println("CLIENT: Timeout, resending unacknowledged packets");
+                        // System.out.println("CLIENT: Timeout, resending unacknowledged packets");
                         for (int packetToResend : sentPackets) {
                             addSequenceNumberToPacket(sendData, packetToResend);
                             DatagramPacket resendPacket = new DatagramPacket(sendData, BUFFER_SIZE, serverAddress, SERVER_PORT);
@@ -140,7 +153,7 @@ public class ClientUDP {
                         }
                         attempts--;
                     } else {
-                        System.out.println("CLIENT: ERROR, maximum number of resend attempts reached");
+                        // System.out.println("CLIENT: ERROR, maximum number of resend attempts reached");
                         return;
                     }
                 }
@@ -148,7 +161,7 @@ public class ClientUDP {
         }
         
         fileInputStream.close();
-        System.out.println("CLIENT: File sent successfully!");
+        // System.out.println("CLIENT: File sent successfully!");
     }    
 
     private static void addSequenceNumberToPacket(byte[] packet, int sequenceNumber) {
@@ -156,6 +169,23 @@ public class ClientUDP {
         packet[1] = (byte) (sequenceNumber >> 16);
         packet[2] = (byte) (sequenceNumber >> 8);
         packet[3] = (byte) sequenceNumber;
+    }
+
+    public static void clearConsole() {
+        try {
+            String operatingSystem = System.getProperty("os.name");
+
+            if (operatingSystem.contains("Windows")) {
+                //WINDOWs
+                new ProcessBuilder("cmd", "/c", "cls").inheritIO().start().waitFor();
+            } else {
+                //UNIX
+                System.out.print("\033[H\033[2J");  
+                System.out.flush();
+            }
+        } catch (Exception e) {
+            System.out.println("Error al limpiar la consola: " + e.getMessage());
+        }
     }
     
 
@@ -168,5 +198,58 @@ class IntWrapper {
 
     public IntWrapper(int initialValue) {
         this.value = initialValue;
+    }
+}
+
+//LOADING SCREEN
+class LoadingScreen implements Runnable {
+    private boolean loading = true;
+
+    @Override
+    public void run() {
+        String[] loadingSymbols = {"|", "/", "-", "\\"}; // Símbolos de carga animada
+        String[] colors = {
+            "\033[1;31m", // Rojo
+            "\033[1;32m", // Verde
+            "\033[1;33m", // Amarillo
+            "\033[1;34m", // Azul
+            "\033[1;35m", // Magenta
+            "\033[1;36m"  // Cian
+        };
+
+        int i = 0;
+        while (loading) {
+            // Cambia el color y símbolo en cada ciclo
+            String color = colors[i % colors.length];
+            String symbol = loadingSymbols[i % loadingSymbols.length];
+            
+            // Imprime la animación de carga
+            System.out.print("\r" + color + "Loading " + symbol + " " + getProgressBar(i % 20) + " \033[0m");
+
+            i++;
+            try {
+                Thread.sleep(200); // Cambia el símbolo y color cada 200 ms
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // Crear barra de progreso dinámica
+    private String getProgressBar(int progress) {
+        StringBuilder bar = new StringBuilder("[");
+        for (int i = 0; i < 20; i++) {
+            if (i < progress) {
+                bar.append("=");
+            } else {
+                bar.append(" ");
+            }
+        }
+        bar.append("]");
+        return bar.toString();
+    }
+
+    public void stopLoading() {
+        this.loading = false;
     }
 }

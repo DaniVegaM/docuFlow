@@ -41,7 +41,7 @@ public class ServerUDP {
             InetAddress clientAddress = receivePacket.getAddress();
             int clientPort = receivePacket.getPort();
 
-            System.out.println("Server: Header received");
+            // System.out.println("Server: Header received");
 
             switch (action) {
                 case "UPLOAD":
@@ -83,22 +83,22 @@ public class ServerUDP {
 
             //Reading the sequence number
             int sequenceNumber = byteArrayToInt(receivePacket.getData(), 0);
-            System.out.println("SERVER: Package received: " + sequenceNumber);
+            // System.out.println("SERVER: Package received: " + sequenceNumber);
 
             //Receiving package
             if (!receivedPackets.containsKey(sequenceNumber)) {
                 receivedPackets.put(sequenceNumber, receivePacket.getData());
-                System.out.println("SERVER: Receiving another package" + sequenceNumber);
+                // System.out.println("SERVER: Receiving another package" + sequenceNumber);
             }
             
             if(sequenceNumber == expectedSequenceNumber){ //It's the expected package
-                System.out.println("SERVER: It's the right package, saving package");
+                // System.out.println("SERVER: It's the right package, saving package");
                 fileOutputStream.write(receivePacket.getData(), 4, receivePacket.getLength() - 4);
                 totalBytesReceived += receivePacket.getLength() - 4;
 
                 //Send ACK to client
                 if(numOfPackagesReceived == 5){
-                    System.out.println("SERVER: 5 packages (A windows) received, sending ACK!");
+                    // System.out.println("SERVER: 5 packages (A window) received, sending ACK!");
                     String ack = "ACK;" + sequenceNumber;
                     byte[] ackData = ack.getBytes();
                     DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
@@ -116,19 +116,19 @@ public class ServerUDP {
                     receiving = false;
                 }
             } else if(sequenceNumber < expectedSequenceNumber){ //If we receive a duplicated package
-                System.out.println("SERVER: Package received duplicated, Im sending the expected sequence number as ACK");
+                // System.out.println("SERVER: Package received duplicated, Im sending the expected sequence number as ACK");
                 //Send ACK to client
                 if(numOfPackagesReceived < 5){
-                    System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
+                    // System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
                     String ack = "ACKR;" + expectedSequenceNumber;
                     byte[] ackData = ack.getBytes();
                     DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
                     serverSocket.send(ackPacket);
                 }
             } else{
-                System.out.println("SERVER: Package out of order :( \n Im sending the expected sequence number as ACK");
+                // System.out.println("SERVER: Package out of order :( \n Im sending the expected sequence number as ACK");
                 if(numOfPackagesReceived < 5){
-                    System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
+                    // System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
                     String ack = "ACKR;" + expectedSequenceNumber;
                     byte[] ackData = ack.getBytes();
                     DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
@@ -138,7 +138,7 @@ public class ServerUDP {
         }
 
         fileOutputStream.close();
-        System.out.println("SERVER: File recieved and saved!");
+        // System.out.println("SERVER: File recieved and saved!");
     }
 
     //Convert first 4 bytes of package received into an int sequence number
