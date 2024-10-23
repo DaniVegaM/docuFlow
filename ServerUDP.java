@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ServerUDP {
 
@@ -14,6 +16,7 @@ public class ServerUDP {
     private static String fileName = "";
     private static int fileLength = 0;
     private static String currentPath = "";
+    private static Map<Integer, byte[]> receivedPackets = new HashMap<>(); //Store received packages
 
     public static void main(String[] args) throws IOException {
         DatagramSocket serverSocket = new DatagramSocket(SERVER_PORT); //Socket
@@ -31,7 +34,9 @@ public class ServerUDP {
 
             String parts[] = command.split(";");
             action = parts[0];
-            currentPath = parts[3];
+            if(parts.length > 3){
+                currentPath = parts[3];
+            }
 
             InetAddress clientAddress = receivePacket.getAddress();
             int clientPort = receivePacket.getPort();
@@ -70,7 +75,7 @@ public class ServerUDP {
         boolean receiving = true;
         long totalBytesReceived = 0;
         int expectedSequenceNumber = 0; //Expected Sequence Number
-        int windowStart = 0; //Window's index
+        int numOfPackagesReceived = 0;
 
         while (receiving) {
             DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
@@ -79,30 +84,56 @@ public class ServerUDP {
             //Reading the sequence number
             int sequenceNumber = byteArrayToInt(receivePacket.getData(), 0);
             System.out.println("SERVER: Package received: " + sequenceNumber);
+
+            //Receiving package
+            if (!receivedPackets.containsKey(sequenceNumber)) {
+                receivedPackets.put(sequenceNumber, receivePacket.getData());
+                System.out.println("SERVER: Receiving another package" + sequenceNumber);
+            }
             
             if(sequenceNumber == expectedSequenceNumber){ //It's the expected package
+                System.out.println("SERVER: It's the right package, saving package");
                 fileOutputStream.write(receivePacket.getData(), 4, receivePacket.getLength() - 4);
                 totalBytesReceived += receivePacket.getLength() - 4;
 
                 //Send ACK to client
-                String ack = "ACK;" + sequenceNumber;
-                byte[] ackData = ack.getBytes();
-                DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
-                serverSocket.send(ackPacket);
+                if(numOfPackagesReceived == 5){
+                    System.out.println("SERVER: 5 packages (A windows) received, sending ACK!");
+                    String ack = "ACK;" + sequenceNumber;
+                    byte[] ackData = ack.getBytes();
+                    DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
+                    serverSocket.send(ackPacket);
+
+                    //Reset variables
+                    numOfPackagesReceived = 0;
+
+                }
 
                 expectedSequenceNumber++;
-                windowStart++;  //Slide window
+                numOfPackagesReceived++;
 
-                if (totalBytesReceived >= fileLength) {
+                if (totalBytesReceived >= fileLength) { //Server received the entire file
                     receiving = false;
                 }
             } else if(sequenceNumber < expectedSequenceNumber){ //If we receive a duplicated package
-                String ack = "ACK;" + sequenceNumber;
-                byte[] ackData = ack.getBytes();
-                DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
-                serverSocket.send(ackPacket);
+                System.out.println("SERVER: Package received duplicated, Im sending the expected sequence number as ACK");
+                //Send ACK to client
+                if(numOfPackagesReceived < 5){
+                    System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
+                    String ack = "ACKR;" + expectedSequenceNumber;
+                    byte[] ackData = ack.getBytes();
+                    DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
+                    serverSocket.send(ackPacket);
+                }
             } else{
-                System.out.println("SERVER: Package out of order :(");
+                System.out.println("SERVER: Package out of order :( \n Im sending the expected sequence number as ACK");
+                if(numOfPackagesReceived < 5){
+                    System.out.println("SERVER: Sending ACK of the package expected to continue recivieng packages until fill the window");
+                    String ack = "ACKR;" + expectedSequenceNumber;
+                    byte[] ackData = ack.getBytes();
+                    DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, clientAddress, clientPort);
+                    serverSocket.send(ackPacket);
+                }
             }
         }
 

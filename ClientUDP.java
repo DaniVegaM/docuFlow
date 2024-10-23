@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Scanner;
 
 public class ClientUDP {
@@ -14,7 +16,7 @@ public class ClientUDP {
     private static String fileName = "";
     private static String destinationPath = "./Server/";
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         DatagramSocket clientSocket = new DatagramSocket();
         InetAddress serverAddress = InetAddress.getByName(SERVER_IP);
         Scanner scanner = new Scanner(System.in);
@@ -51,7 +53,7 @@ public class ClientUDP {
     }
 
     //UPLOAD
-    public static void sendFileWithMetadata(DatagramSocket clientSocket, InetAddress serverAddress, String fileName, String destinationPath) throws IOException {
+    public static void sendFileWithMetadata(DatagramSocket clientSocket, InetAddress serverAddress, String fileName, String destinationPath) throws IOException, InterruptedException {
         File file = new File("./Client/" + fileName);
         if (!file.exists()) {
             System.out.println("CLIENT ERROR: The file doesn't exist");
@@ -66,57 +68,88 @@ public class ClientUDP {
         DatagramPacket headerPacket = new DatagramPacket(headerBytes, headerBytes.length, serverAddress, SERVER_PORT);
         clientSocket.send(headerPacket);
         
-        //Sending file
+        //Setting File
         FileInputStream fileInputStream = new FileInputStream(file);
         byte[] fileBuffer = new byte[BUFFER_SIZE - 4];
         byte[] sendData = new byte[BUFFER_SIZE];
         
         int bytesRead;
         int sequenceNumber = 0;
-        int windowStart = 0; //Window's index
-        int windowEnd = WINDOW_SIZE - 1;  // Fin de la ventana
-        int lastAckReceived = -1;
+        int windowStart = 0; 
+        IntWrapper lastAckReceived = new IntWrapper(-1);
+        int attempts = 3; //Number of attempts to resend packages
+    
+        //Queue to remember which packets we sent
+        Queue<Integer> sentPackets = new LinkedList<>();
+    
+        while ((bytesRead = fileInputStream.read(fileBuffer)) != -1 || !sentPackets.isEmpty()) { //SENDING PACKAGES
+    
+            // If there is space in the window, keep sending packets
+            if(sentPackets.isEmpty()){
+                attempts = 3;
+                while (windowStart - lastAckReceived.value < WINDOW_SIZE && bytesRead != -1) {
+                    addSequenceNumberToPacket(sendData, sequenceNumber);
+                    System.arraycopy(fileBuffer, 0, sendData, 4, bytesRead);
+                    
+                    // Send packet
+                    DatagramPacket filePacket = new DatagramPacket(sendData, bytesRead + 4, serverAddress, SERVER_PORT);
+                    clientSocket.send(filePacket);
+                    sentPackets.add(sequenceNumber);
+        
+                    sequenceNumber++;
+                    bytesRead = fileInputStream.read(fileBuffer);
 
-        while ((bytesRead = fileInputStream.read(fileBuffer)) != -1) {
+                    //Wait until send the next package
+                    Thread.sleep(10); //PRETTY IMPORTANT!!!!!!!
+                }
+            }
+    
+            // Handling ACKs
             boolean ackReceived = false;
-
-            while(!ackReceived){
-                //Add sequence number to the package
-                addSequenceNumberToPacket(sendData, sequenceNumber);
-
-                //Copy file data to the package (after the 4 bytes of sequence-number)
-                System.arraycopy(fileBuffer, 0, sendData, 4, bytesRead);
-
-                //Sending package
-                DatagramPacket filePacket = new DatagramPacket(sendData, bytesRead + 4, serverAddress, SERVER_PORT);
-                clientSocket.send(filePacket);
-
-                try { //Waiting for Server's ACK
+            while (!ackReceived && !sentPackets.isEmpty()) {
+                try {
                     byte[] ackBuffer = new byte[BUFFER_SIZE];
                     DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
-                    clientSocket.setSoTimeout(1000); //Wait 1000 for ACK
+                    clientSocket.setSoTimeout(1000); //Wait for 1 second
                     clientSocket.receive(ackPacket);
-
-                    //Read ACK
+    
+                    // Read ACK
+                    System.out.println("CLIENT: ACK received for all packages in a window");
                     String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
                     String[] ackParts = ack.split(";");
-                    int ackSequenceNumber = Integer.parseInt(ackParts[1]);
-
-                    if (ackSequenceNumber == sequenceNumber) {
-                        ackReceived = true; //We received the right ACK
-                        sequenceNumber++;
-                        windowStart++; //Slide Window
+                    if (ackParts[0].equals("ACK")){
+                        int ackSequenceNumber = Integer.parseInt(ackParts[1]);
+        
+                        if (ackSequenceNumber > lastAckReceived.value) { 
+                            lastAckReceived.value = ackSequenceNumber;
+                            // Remove acknowledged packets
+                            sentPackets.removeIf(seqNum -> seqNum <= lastAckReceived.value);
+                            ackReceived = true;
+                        }
+                    } else{
+                        System.out.println("CLIENT: I received an strange Datagram :/");
                     }
                 } catch (IOException e) {
-                    //If we don't receive the right ACK there was an error, so we need to resend the package
-                    System.out.println("No se recibió ACK para el paquete con secuencia: " + sequenceNumber + ". Retransmitiendo...");
+                    // Resend if timeout occurs
+                    if (attempts > 0) {
+                        System.out.println("CLIENT: Timeout, resending unacknowledged packets");
+                        for (int packetToResend : sentPackets) {
+                            addSequenceNumberToPacket(sendData, packetToResend);
+                            DatagramPacket resendPacket = new DatagramPacket(sendData, BUFFER_SIZE, serverAddress, SERVER_PORT);
+                            clientSocket.send(resendPacket);
+                        }
+                        attempts--;
+                    } else {
+                        System.out.println("CLIENT: ERROR, maximum number of resend attempts reached");
+                        return;
+                    }
                 }
             }
         }
         
         fileInputStream.close();
-        System.out.println("CLIENT: File sent successful!");
-    }
+        System.out.println("CLIENT: File sent successfully!");
+    }    
 
     private static void addSequenceNumberToPacket(byte[] packet, int sequenceNumber) {
         packet[0] = (byte) (sequenceNumber >> 24);
@@ -125,4 +158,15 @@ public class ClientUDP {
         packet[3] = (byte) sequenceNumber;
     }
     
+
+    
+}
+
+//For avoid problems with final variables
+class IntWrapper {
+    public int value;
+
+    public IntWrapper(int initialValue) {
+        this.value = initialValue;
+    }
 }
