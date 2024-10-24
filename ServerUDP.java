@@ -1,9 +1,12 @@
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,16 +53,44 @@ public class ServerUDP {
                     receiveFile(serverSocket, clientAddress, clientPort);
                 break;
                 case "DOWNLOAD":
-                   
+                    // System.out.println("DOWNLOADING");
+                    fileName = parts[1];
+                    currentPath = parts[2];
+                    sendFile(serverSocket, clientAddress, clientPort, fileName);
                 break;
                 case "CREATEF":
-                    
+                System.out.println("PARTS1: " + parts[1]);
+                System.out.println("PARTS2: " + parts[2]);
+                    String folderPath = "./Server/" + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[2] + "/") + parts[1];
+                    System.out.println("CREATE: " + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[2] + "/") + parts[1]);
+                    boolean created = createFolder(folderPath);
+                    if (created) {
+                        System.out.println("Folder Created Succesfully!");
+                    } else {
+                        System.out.println("There's an error :(");
+                }
                 break;
                 case "DELETEF":
-                    
+                    File folderToDelete = new File("./Server/" + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[2] + "/") + parts[1]);
+                    System.out.println("DELETE: " + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[2] + "/") + parts[1]);
+                    boolean deleted = deleteFolder(folderToDelete);
+                    if (deleted) {
+                        System.out.println("Folder deleted succesfully");
+                    } else {
+                        System.out.println("There's an error :(");
+                    }
                 break;
-                case "RENAMEF":
+                case "RENAME":
+                    File oldFile = new File("./Server/" + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[3] + "/") + parts[1]);
+                    File newFile = new File("./Server/" + ((Arrays.stream(parts).anyMatch(x -> x.equals("x")))?"":parts[3] + "/") + parts[2]);
                     
+                    boolean renamed = oldFile.renameTo(newFile);
+                    
+                    if (renamed) {
+                        System.out.println("File renamed succesfully!");
+                    } else {
+                        System.out.println("There's an error :(");
+                    }
                 break;
                 default:
                     // System.out.println("I don't know what do you want to do ¿?");
@@ -70,7 +101,7 @@ public class ServerUDP {
 
     public static void receiveFile(DatagramSocket serverSocket, InetAddress clientAddress, int clientPort) throws IOException {
         byte[] receiveData = new byte[BUFFER_SIZE];
-        FileOutputStream fileOutputStream = new FileOutputStream(currentPath + fileName);
+        FileOutputStream fileOutputStream = new FileOutputStream(((currentPath != "" || currentPath != " ")? currentPath + "/" : currentPath) + fileName);
 
         boolean receiving = true;
         long totalBytesReceived = 0;
@@ -145,5 +176,65 @@ public class ServerUDP {
     private static int byteArrayToInt(byte[] arr, int offset) {
         return ((arr[offset] & 0xFF) << 24) | ((arr[offset + 1] & 0xFF) << 16) |
                ((arr[offset + 2] & 0xFF) << 8) | (arr[offset + 3] & 0xFF);
+    }
+
+    public static void sendFile(DatagramSocket serverSocket, InetAddress clientAddress, int clientPort, String fileName) throws IOException {
+        File file = new File(currentPath + fileName);
+        if (!file.exists()) {
+            System.out.println("SERVER ERROR: The file doesn't exist");
+            return;
+        }
+
+        FileInputStream fileInputStream = new FileInputStream(file);
+        byte[] fileBuffer = new byte[BUFFER_SIZE - 4];
+        byte[] sendData = new byte[BUFFER_SIZE];
+        int bytesRead;
+        int sequenceNumber = 0;
+
+        while ((bytesRead = fileInputStream.read(fileBuffer)) != -1) {
+            addSequenceNumberToPacket(sendData, sequenceNumber);
+            System.arraycopy(fileBuffer, 0, sendData, 4, bytesRead);
+
+            // Enviar paquete
+            DatagramPacket filePacket = new DatagramPacket(sendData, bytesRead + 4, clientAddress, clientPort);
+            serverSocket.send(filePacket);
+
+            // Esperar ACK del cliente
+            DatagramPacket ackPacket = new DatagramPacket(new byte[BUFFER_SIZE], BUFFER_SIZE);
+            serverSocket.receive(ackPacket);
+            String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
+            String[] ackParts = ack.split(";");
+
+            if (ackParts[0].equals("ACK")) {
+                int ackSequenceNumber = Integer.parseInt(ackParts[1]);
+                sequenceNumber++; // Solo incrementar si se recibió el ACK correctamente
+            }
+        }
+
+        fileInputStream.close();
+    }
+
+    private static void addSequenceNumberToPacket(byte[] packet, int sequenceNumber) {
+        packet[0] = (byte) (sequenceNumber >> 24);
+        packet[1] = (byte) (sequenceNumber >> 16);
+        packet[2] = (byte) (sequenceNumber >> 8);
+        packet[3] = (byte) sequenceNumber;
+    }
+
+    public static boolean deleteFolder(File folder) {
+        if (folder.isDirectory()) {
+            File[] files = folder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    deleteFolder(file); // Llamada recursiva
+                }
+            }
+        }
+        return folder.delete(); // Elimina el archivo o carpeta
+    }
+
+    public static boolean createFolder(String path) {
+        File newFolder = new File(path);
+        return newFolder.mkdir(); // Devuelve true si se crea la carpeta
     }
 }

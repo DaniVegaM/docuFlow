@@ -1,5 +1,6 @@
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -14,7 +15,10 @@ public class ClientUDP {
     private static final int WINDOW_SIZE = 5; 
     private static final String SERVER_IP = "localhost";
     private static String fileName = "";
+    private static String folderPath = "";
     private static String destinationPath = "./Server/";
+    private static String newFileName = "";
+    private static String filePath = "";
 
     public static void main(String[] args) throws IOException, InterruptedException {
         DatagramSocket clientSocket = new DatagramSocket();
@@ -48,16 +52,69 @@ public class ClientUDP {
                     clearConsole();
                 break;
                 case "2": //DOWNLOAD
-
+                    System.out.println("File name: ");
+                    fileName = scanner.nextLine();
+                    System.out.println("File location: ");
+                    destinationPath += scanner.nextLine();
+                
+                    loadingThread.start();
+                    requestFile(clientSocket, serverAddress, fileName, destinationPath);
+                    loadingScreen.stopLoading();
+                    loadingThread.join();
+                
+                    System.out.print("\r\033[1;32mFile downloaded successfully!                \033[0m\n");
+                    Thread.sleep(1000);
+                    clearConsole();
                 break;
-                case "3":
+                case "3": //CREATEF
+                    System.out.println("Folder name: ");
+                    fileName = scanner.nextLine();
+                    System.out.println("Where do you want to create the folder? (location): ");
+                    folderPath = scanner.nextLine();
+                
+                    loadingThread.start();
+                    createFORdeleteFORrenameFile(clientSocket, serverAddress, fileName, folderPath, "C");
+                    loadingScreen.stopLoading();
+                    loadingThread.join();
+            
+                    System.out.print("\r\033[1;32mFolder created succesfuly!                \033[0m\n");
 
+                    Thread.sleep(1000);
+                    clearConsole();
                 break;
-                case "4":
+                case "4": //DELETEF
+                    System.out.println("Folder name: ");
+                    fileName = scanner.nextLine();
+                    System.out.println("Where is the folder? (location): ");
+                    folderPath = scanner.nextLine();
+                
+                    loadingThread.start();
+                    createFORdeleteFORrenameFile(clientSocket, serverAddress, fileName, folderPath, "D");
+                    loadingScreen.stopLoading();
+                    loadingThread.join();
+            
+                    System.out.print("\r\033[1;32mFolder deleted succesfuly!                \033[0m\n");
 
+                    Thread.sleep(1000);
+                    clearConsole();
                 break;
-                case "5":
+                case "5": //RENAME
+                    System.out.println("Original name of file");
+                    fileName = scanner.nextLine();
+                    System.out.println("New name of file");
+                    newFileName = scanner.nextLine();
+                    System.out.println("File location?: ");
+                    filePath = scanner.nextLine();
+                
+                    loadingThread.start();
+                    createFORdeleteFORrenameFile(clientSocket, serverAddress, fileName, "", "R");
+                    loadingScreen.stopLoading();
+                    loadingThread.join();
+            
+                    System.out.print("\r\033[1;32mFolder created succesfuly!                \033[0m\n");
 
+                    Thread.sleep(1000);
+                    clearConsole();
                 break;
             }
             //Reset variables
@@ -169,6 +226,88 @@ public class ClientUDP {
         packet[1] = (byte) (sequenceNumber >> 16);
         packet[2] = (byte) (sequenceNumber >> 8);
         packet[3] = (byte) sequenceNumber;
+    }
+
+    public static void requestFile(DatagramSocket clientSocket, InetAddress serverAddress, String fileName, String destinationPath) throws IOException {
+        // Enviar la solicitud de descarga
+        String requestHeader = "DOWNLOAD;" + fileName + ";" + destinationPath;
+        byte[] requestBytes = requestHeader.getBytes();
+        DatagramPacket requestPacket = new DatagramPacket(requestBytes, requestBytes.length, serverAddress, SERVER_PORT);
+        clientSocket.send(requestPacket);
+
+        // Preparar para recibir el archivo
+        FileOutputStream fileOutputStream = new FileOutputStream("./Client/" + fileName);
+        byte[] receiveData = new byte[BUFFER_SIZE];
+        boolean receiving = true;
+        int expectedSequenceNumber = 0;
+
+        while (receiving) {
+            DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
+            clientSocket.receive(receivePacket);
+
+            // Leer el número de secuencia
+            int sequenceNumber = byteArrayToInt(receivePacket.getData(), 0);
+            if (sequenceNumber == expectedSequenceNumber) { // Es el paquete esperado
+                fileOutputStream.write(receivePacket.getData(), 4, receivePacket.getLength() - 4);
+                expectedSequenceNumber++;
+
+                // Enviar ACK al servidor
+                String ack = "ACK;" + sequenceNumber;
+                byte[] ackData = ack.getBytes();
+                DatagramPacket ackPacket = new DatagramPacket(ackData, ackData.length, serverAddress, SERVER_PORT);
+                clientSocket.send(ackPacket);
+            }
+            
+            if (receivePacket.getLength() < BUFFER_SIZE) { // Si el tamaño del paquete es menor que el buffer, se considera que ha terminado la transmisión
+                receiving = false;
+            }
+        }
+
+        fileOutputStream.close();
+    }
+
+    private static int byteArrayToInt(byte[] bytes, int offset) {
+        return ((bytes[offset] & 0xFF) << 24) |
+               ((bytes[offset + 1] & 0xFF) << 16) |
+               ((bytes[offset + 2] & 0xFF) << 8) |
+               (bytes[offset + 3] & 0xFF);
+    }
+    
+    private static void createFORdeleteFORrenameFile(DatagramSocket clientSocket, InetAddress serverAddress, String folderName, String destinationPath, String mode) throws IOException{
+        if(mode.equals("C")){ //Create Folder
+            if(destinationPath == "" || destinationPath == " "){
+                destinationPath = "x";
+            }
+            //Header
+            String header = "CREATEF;" + folderName + ";" + destinationPath;
+            byte[] headerBytes = header.getBytes();
+            
+            //Sending the header
+            DatagramPacket headerPacket = new DatagramPacket(headerBytes, headerBytes.length, serverAddress, SERVER_PORT);
+            clientSocket.send(headerPacket);
+        } else if(mode.equals("D")){
+            if(destinationPath == "" || destinationPath == " "){
+                destinationPath = "x";
+            }
+            //Header
+            String header = "DELETEF;" + folderName + ";" + destinationPath;
+            byte[] headerBytes = header.getBytes();
+            
+            //Sending the header
+            DatagramPacket headerPacket = new DatagramPacket(headerBytes, headerBytes.length, serverAddress, SERVER_PORT);
+            clientSocket.send(headerPacket);
+        } else{
+            if(filePath == "" || filePath == " "){
+                filePath = "x";
+            }
+            //Header
+            String header = "RENAME;" + fileName + ";" + newFileName + ";" + filePath;
+            byte[] headerBytes = header.getBytes();
+            
+            //Sending the header
+            DatagramPacket headerPacket = new DatagramPacket(headerBytes, headerBytes.length, serverAddress, SERVER_PORT);
+            clientSocket.send(headerPacket);
+        }
     }
 
     public static void clearConsole() {
